@@ -1,0 +1,35 @@
+@startuml
+package "Robomaster S1 A"{
+    [Open CR A] -up-serialA
+    [Jetson Nano A] -down-serialA
+}
+
+package "Local Infrastructure"{
+    [Rooter]
+    [Monitor Machine]
+}
+
+[Jetson Nano A] -right-MQTT
+MQTT-down-[Rooter]
+
+package "Robomaster S1 B"{
+    [Open CR B] -up-serialB
+    [Jetson Nano B] -down-serialB
+}
+
+MQTT-left-[Jetson Nano B] 
+
+package "AWS" {
+    [Kinesis Video Strean]->[EC2(FrontEnd)]
+    [Rooter] -down-> [Cognito]
+    [Cognito] -down-> [AWS IoT]
+    [Cognito] -> [Kinesis Video Strean]
+    [AWS IoT] -down-> [Dynamo DB]
+    [AWS IoT] -down-> [lambda]
+    [Dynamo DB] -up-> [EC2(FrontEnd)]
+    [lambda] -up-> [EC2(FrontEnd)]
+}
+
+[EC2(FrontEnd)] -up-> [Monitor Machine]
+
+@enduml

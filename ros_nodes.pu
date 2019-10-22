@@ -1,0 +1,155 @@
+@startuml
+node "Driver"{
+    package "robomaster_s1_driver"{
+        [opencr_communicator]-down->current_gimbal_joint_angle
+        [opencr_communicator]-down->target_twist
+        target_gimbal_joint_angle-up->[opencr_communicator]
+        current_gimbal_joint_angle-down->[joint_state_publisher_node]
+        target_twist-down->[twist_cmd_reciever_node]
+        [gimbal_controller_node]-up->target_gimbal_joint_angle
+        bullet_state-down->[bullet_manager_node]
+        [opencr_communicator]-down->bullet_state
+        [bullet_manager_node]-up->shot_request
+        shot_request-up->[opencr_communicator]
+        [bullet_manager_node]-down->sound_cmd
+        sound_cmd-down->[soud_player]
+    }
+
+    package "hls_lfcd_lds_driver"{
+        [front_hlds_laser_publisher_node]
+        [rear_hlds_laser_publisher_node]
+    }
+
+    package "ros2_intel_realsense"{
+        [t265_driver_node]
+        [d435_driver_node]
+    }
+}
+
+node "Cloud Integration"{
+    package "mqtt_bridge"{
+        [mqtt_bridge_node]
+    }
+    bullet_state-down->[mqtt_bridge_node]
+
+    package "kinesisvideo-ros2"{
+        [kinesis_ros_node]
+    }
+}
+
+image_raw-up->[kinesis_ros_node]
+[joint_state_publisher_node]-down->tf
+[front_hlds_laser_publisher_node]-down->front_scan 
+[rear_hlds_laser_publisher_node]-down->rear_scan 
+[bullet_manager_node]-down->bullet_remain
+shot_cmd-up->[bullet_manager_node]
+
+node "Localization"{
+    package "hough_matching_localization"{
+        [hough_matching_localization_node]
+    }
+
+    package "ekf_localization"{
+        [ekf_localization_node]
+    }
+
+    package "2d_map_loader"{
+        [2d_map_loader_node]
+    }
+
+    package "odom_frame_publisher"{
+        [odom_frame_publisher_node]
+    }
+    
+    [2d_map_loader_node]-up->map
+    map-down->[hough_matching_localization_node]
+    [hough_matching_localization_node]-up->hough_pose
+    hough_pose-up->[ekf_localization_node]
+}
+
+[odom_frame_publisher_node]-up->tf
+tf->[ekf_localization_node]
+[ekf_localization_node]-up->current_pose
+current_pose->[odom_frame_publisher_node]
+[t265_driver_node]-down->t265_cloud
+[d435_driver_node]-down->d435_cloud
+[d435_driver_node]-down->image_raw
+
+node "Perception"{
+    package "laserscan_to_pointcloud"{
+        front_scan-down->[front_laserscan_to_pointcloud]
+        rear_scan-down->[rear_laserscan_to_pointcloud]
+    }
+
+    [front_laserscan_to_pointcloud]-down->front_scan_points
+    [rear_laserscan_to_pointcloud]-down->rear_scan_points
+
+    package "pcl_apps"{
+        front_scan_points-down->[scan_pointsenate_node]
+        rear_scan_points-down->[scan_pointsenate_node]
+        t265_cloud-down->[points_concatenate_node]
+        d435_cloud-down->[points_concatenate_node]
+        [points_concatenate_node]-down->realsense_points
+        realsense_points-down->[crop_box_filter_node]
+        [crop_box_filter_node]-down->points_object
+        [crop_box_filter_node]-down->points_map
+        points_object-down->[euclidean_cluster_node]
+    }
+    [euclidean_cluster_node]-down->points_cluster
+    [scan_pointsenate_node]-down->scan_points
+    scan_points-down->[hough_matching_localization_node]
+
+    package "tensorrt_ros"{
+        image_raw-down->[tensorrt_ros_node]
+    }
+    [tensorrt_ros_node]-down->detection_image
+
+    package "cluster_image_fusion"{
+        detection_image-down->[cluster_image_fusion_node]
+        points_cluster-down->[cluster_image_fusion_node]
+    }
+
+    package "enemy_finder"{
+        map->[enemy_scan_points_finder]
+        current_pose->[enemy_scan_points_finder]
+        scan_points-down->[enemy_scan_points_finder]
+        [enemy_cluster_finder]
+        [enemy_scan_points_finder]-down->enemy_point_2d
+        [enemy_cluster_finder]-down->enemy_point_3d
+        enemy_point_3d-down->[enemy_finder]
+        enemy_point_2d-down->[enemy_finder]
+    }
+
+    enemy_cluster-down->[enemy_cluster_finder]
+    [cluster_image_fusion_node]-down->enemy_cluster
+    [enemy_finder]-down->enemy_point
+}
+[t265_driver_node]-down->odom
+odom-down->[ekf_localization_node]
+
+node "Planning"{
+    package "behavior_planner"{
+        [lookat_angle_calculator]-down->lookat_angle
+        lookat_angle-down->[task_planner_node]
+    }
+    enemy_point-down->[lookat_angle_calculator]
+    tf-down->[lookat_angle_calculator]
+
+    package "path_planner"{
+        [hybrid_aster_planner]
+    }
+
+    [task_planner_node]-down->next_waypoint
+    next_waypoint-down->[hybrid_aster_planner]
+    [hybrid_aster_planner]-up->current_twist_cmd
+    current_twist_cmd-up->[task_planner_node]
+    bullet_remain-down->[task_planner_node]
+    [task_planner_node]-up->shot_cmd
+}
+
+[task_planner_node]-up->twist_cmd
+twist_cmd-up->[twist_cmd_reciever_node]
+[task_planner_node]-up->joint_cmd
+joint_cmd-up->[gimbal_controller_node]
+
+@enduml
